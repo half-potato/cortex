@@ -10,10 +10,13 @@ from neuron import Neuron
 plt.ion()
 
 n = 5
-learning_rate = 0.1
+learning_rate = 0.2
+punishment_rate = 0.001
 cell_death_threhold = 12 # less than this number
 cell_death_record = 100
 enable_apoptosis = False
+PUNISH_DURATION = 1
+REWARD_DURATION = 1
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
@@ -29,10 +32,6 @@ class Network:
         self.size = n
         self.fire_record = np.zeros((n, 1))
         self.step = 0
-        self.input = [0] * n
-        self.input_mask = [0] * n
-        self.output = [0] * n
-        self.output_mask = [0] * n
 
         self.randomlyStimulate()
         self.G = nx.DiGraph()
@@ -47,7 +46,7 @@ class Network:
 
     def update(self):
         # weighted input to neurons
-        changes = np.dot(self.weights, self.firings)# / 100
+        changes = np.dot(self.weights, self.firings) * 70
         soft = softmax(changes)
 
         # input to neurons
@@ -85,26 +84,35 @@ class Network:
 
     # Add to neurons around the ring
     # x = array of potential differences
-    # mask = array of affected neurons, 1 = use neuron, 0 = unused
-    def input(self, x, mask):
-        self.input = x
-        self.input_mask = mask
+    # index = array of indexes of firings
+    def input(self, x, index):
+        assert(index.shape == x.T.shape)
+        self.firings[index] = x
 
     # Set the output firing of the network
     # y = array of target firings
-    # mask = array of output neurons, 1 = use neuron, 0 = unused
-    def output(self, y):
-        self.output = y
-        self.output_mask = mask
+    # index = array of indexes of firings
+    def output(self, y, index):
+        assert(np.squeeze(index).shape == np.squeeze(y.T).shape)
+        fs = self.firings[np.squeeze(index)]
+        differences = np.logical_xor(fs, y)
+        punishable = np.logical_and(fs, np.logical_not(y))
+        print(np.sum(punishable))
+        self.punish(np.sum(punishable)/5, PUNISH_DURATION)
+        #similarities = np.logical_not(differences)
+        #self.punish(-similarities, REWARD_DURATION)
+        # This should automatically strengthen the connections
+        self.firings[np.squeeze(index)] = y
+        return fs
 
     def punish(self, error, duration):
-        for i, v in self.neurons:
-            if i.lastFiring < duration:
-                change = error * learning_rate
+        for i, v in enumerate(self.neurons):
+            if v.lastFiring < duration:
+                change = error * punishment_rate
                 # Change it's outbound connections
-                self.weights[v, :] -= change
+                self.weights[i, :] -= change
                 # Change it's inbound connections
-                self.weights[:, v] -= change
+                self.weights[:, i] -= change
 
     def randomlyStimulate(self):
         print("Randomly stimulated")
@@ -140,7 +148,6 @@ class Network:
             y = int(math.floor(float(i) / w))
             x = i - y*w
             img[y, x] = v.potential
-        print(img)
         cv2.imshow("Potentials", img)
         cv2.waitKey(1)
 
